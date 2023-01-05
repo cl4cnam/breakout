@@ -1,0 +1,212 @@
+#===============================
+#
+# Preparation
+# -----------
+#
+#===============================
+
+#========
+# drawing
+#========
+{deffunc drawNewBrick (p_x p_y)
+	:displayNewSVGElementIn (+ '<rect width="75" height="20" x="' $p_x '" y="' $p_y '" style="fill: #0095DD" />') 'svg'
+}
+
+{deffunc drawNewBall (p_x p_y)
+	:displayNewSVGElementIn (+ '<circle r="10" cx="' $p_x '" cy="' $p_y '" style="fill: #0095DD" />') 'svg'
+}
+
+{deffunc drawNewPaddle (p_x p_y)
+	:displayNewSVGElementIn (+ '<rect id="paddle" width="75" height="10" x="' $p_x '" y="' $p_y '" style="fill: #0095DD" />') 'svg'
+}
+
+{deffunc drawText (p_x p_y p_text)
+	:displayNewSVGElementIn (+ '<text style="font: 16px Arial;fill: #0095DD;" x="' $p_x '" y="' $p_y '">' $p_text '</text>') 'svg'
+}
+
+#=================
+# lives of objects
+#=================
+{deffunc lifeOfBrick (p_column p_row)
+	# birth
+	#---------
+	.var life
+	.var thisBrick <-- :drawNewBrick [[$p_column * 85] + 30] [[$p_row * 30] + 30]
+	
+	# after birth
+	#------------
+	{par @life
+		%continuous adapt thisBrick `
+			function collision(ballCx, ballCy, brickX, brickY, brickWidth, brickHeight) {
+				return ballCx > brickX && ballCx < brickX+brickWidth && ballCy > brickY && ballCy < brickY+brickHeight
+			}
+			// Meeting
+			//--------
+			for (const ball of events.get('oneBall')) {
+				if (     ball && collision(  v(ball.cx),  v(ball.cy),  v(thisBrick.x),  v(thisBrick.y),  v(thisBrick.width),  v(thisBrick.height)  )     ) {
+					ball.dy = - ball.dy
+					goBreak('life')
+				}
+			}
+		`
+	}
+	
+	# death
+	#-------
+	{short (thisBrick) `
+		thisBrick.parentNode.removeChild(thisBrick)
+	`}
+}
+
+{deffunc lifeOfPaddle ()
+	# birth
+	#-----------
+	.var thisPaddle <-- :drawNewPaddle 202 310
+	
+	# after birth
+	#------------
+	{par
+		.var stopMove
+		{while true
+			.var evt <-- :awaitDOMevtBeep $document 'keydown'
+			{short (evt thisPaddle) `thisPaddle.evt = evt`}
+			%doOnce
+				%continuous play thisPaddle `
+					if(thisPaddle.evt.code  == "ArrowRight") {
+						thisPaddle.setAttribute('x', v(thisPaddle.x) + 7)
+					} else if (thisPaddle.evt.code  == "ArrowLeft") {
+						thisPaddle.setAttribute('x', v(thisPaddle.x) - 7)
+					}
+				`
+			until stopMove
+		}
+		{while true
+			stopMove <-- :awaitDOMevtBeep $document 'keyup'
+		}
+		%listener $document 'mousemove' `
+			const gameZone = document.getElementById('gameZone')
+			const relativeX = evt.clientX - gameZone.getBoundingClientRect().left
+			const paddle = document.getElementById('paddle')
+			paddle.setAttribute('x', relativeX - 37)
+		`
+		%continuous adapt thisPaddle `
+			function collision(ballCx, ballCy, brickX, brickY, brickWidth, brickHeight) {
+				return ballCx > brickX && ballCx < brickX+brickWidth && ballCy > brickY && ballCy < brickY+brickHeight
+			}
+			// Meeting
+			//--------
+			for (const ball of events.get('oneBall')) {
+				if (     ball && collision(  v(ball.cx),  v(ball.cy),  v(thisPaddle.x),  v(thisPaddle.y),  v(thisPaddle.width),  v(thisPaddle.height)  )     ) {
+					ball.dy = - ball.dy
+				}
+			}
+		`
+	}
+}
+
+{deffunc lifeOfBall ()
+	# birth
+	#-----------
+	.var life
+	.var thisBall <-- :drawNewBall 240 290
+	{short (thisBall) `
+		thisBall.dx = 2
+		thisBall.dy = -2
+	`}
+	
+	# after birth
+	#------------
+	{par @life
+		%continuous send thisBall `
+			send('oneBall', thisBall)
+		`
+		%continuous adapt thisBall `
+			// Bouncing
+			//---------
+			if (v(thisBall.cx) + v(thisBall.r) > 480) thisBall.dx = - Math.abs(thisBall.dx)
+			if (v(thisBall.cx) - v(thisBall.r) < 0) thisBall.dx = Math.abs(thisBall.dx)
+			if (v(thisBall.cy) - v(thisBall.r) < 0) thisBall.dy = Math.abs(thisBall.dy)
+			
+			if (v(thisBall.cy) - v(thisBall.r) > 320) {
+				goBreak('life')
+			}
+		`
+		%continuous play thisBall `
+			thisBall.setAttribute('cx', v(thisBall.cx) + thisBall.dx)
+			thisBall.setAttribute('cy', v(thisBall.cy) + thisBall.dy)
+		`
+	}
+	
+	# death
+	#-------
+	{short (thisBall) `
+		thisBall.parentNode.removeChild(thisBall)
+	`}
+}
+
+#===============================
+#
+# Main program
+# ------------
+#
+#===============================
+
+.var column <-- :parRange 0 4
+.var row <-- :parRange 0 2
+
+.var numberOfLives <-- 3
+.var livesText <-- %drawText 415 20 'Lives: 3'
+
+.var score <-- 0
+.var scoreText <-- %drawText 8 20 'Score: 0'
+
+{par
+	
+	#===================
+	# Lives of objects
+	#===================
+	
+	# Bricks
+	#--------
+	{seq
+		{foreach column     # 'foreach' execute each one in parallel
+			{foreach row
+				{seq
+					:lifeOfBrick $column $row
+					score <-- [+ 1]
+				}
+			}
+		}
+		{short () `alert("YOU WIN, CONGRATS!");document.location.reload()`}
+	}
+	
+	# Ball
+	#--------
+	{seq
+		{while [$numberOfLives > 0]
+			!lifeOfBall
+			numberOfLives <-- [- 1]
+		}
+		{short () `alert("GAME OVER");document.location.reload()`}
+	}
+	
+	# Paddle
+	#--------
+	!lifeOfPaddle
+	
+	#=======================================
+	# Display of all pieces of information
+	#=======================================
+	{while true
+		:await numberOfLives beep
+		{short (livesText numberOfLives) `
+			livesText.textContent = 'Lives: ' + numberOfLives
+		`}
+	}
+	{while true
+		:await score beep
+		{short (scoreText score) `
+			scoreText.textContent = 'Score: ' + score
+		`}
+	}
+}
