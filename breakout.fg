@@ -5,9 +5,17 @@
 #
 #===============================
 
+# JavaScript functions that will be available in each 'continuous' instruction
+{prepContinuous `
+	function collision(ballCx, ballCy, brickX, brickY, brickWidth, brickHeight) {
+		return ballCx > brickX && ballCx < brickX+brickWidth && ballCy > brickY && ballCy < brickY+brickHeight
+	}
+`}
+
 #========
 # drawing
 #========
+
 {deffunc drawNewBrick (p_x p_y)
 	:displayNewSVGElementIn (+ '<rect width="75" height="20" x="' $p_x '" y="' $p_y '" style="fill: #0095DD" />') 'svg'
 }
@@ -27,19 +35,17 @@
 #=================
 # lives of objects
 #=================
+
 {deffunc lifeOfBrick (p_column p_row)
 	# birth
-	#---------
+	#======
 	.var life
 	.var thisBrick <-- :drawNewBrick [[$p_column * 85] + 30] [[$p_row * 30] + 30]
 	
 	# after birth
-	#------------
+	#============
 	{par @life
-		%continuous adapt thisBrick `
-			function collision(ballCx, ballCy, brickX, brickY, brickWidth, brickHeight) {
-				return ballCx > brickX && ballCx < brickX+brickWidth && ballCy > brickY && ballCy < brickY+brickHeight
-			}
+		%whileTrueAwaitFrame adapt thisBrick `
 			// Meeting
 			//--------
 			for (const ball of events.get('oneBall')) {
@@ -52,47 +58,53 @@
 	}
 	
 	# death
-	#-------
-	{short (thisBrick) `
+	#======
+	{js (thisBrick) `
 		thisBrick.parentNode.removeChild(thisBrick)
 	`}
 }
 
 {deffunc lifeOfPaddle ()
 	# birth
-	#-----------
+	#======
 	.var thisPaddle <-- :drawNewPaddle 202 310
 	
 	# after birth
-	#------------
+	#============
 	{par
+		# keyboard management
+		#--------------------
 		.var stopMove
-		{while true
+		.var move
+		# Each 'keyup' is translated into a stopMove
+		%whileTrueAwaitDom_translate $document 'keyup' stopMove
+		{whileTrue
 			.var evt <-- :awaitDOMevtBeep $document 'keydown'
-			{short (evt thisPaddle) `thisPaddle.evt = evt`}
-			%doOnce
-				%continuous play thisPaddle `
+			{js (evt thisPaddle) `thisPaddle.evt = evt`}
+			{par @move
+				# first parallel branch: await a stopMove and break the 'par' construct
+				move <-- :await stopMove beep
+				# second parallel branch: At each frame, move the paddle
+				%whileTrueAwaitFrame play thisPaddle `
 					if(thisPaddle.evt.code  == "ArrowRight") {
 						thisPaddle.setAttribute('x', v(thisPaddle.x) + 7)
 					} else if (thisPaddle.evt.code  == "ArrowLeft") {
 						thisPaddle.setAttribute('x', v(thisPaddle.x) - 7)
 					}
 				`
-			until stopMove
+			}
 		}
-		{while true
-			stopMove <-- :awaitDOMevtBeep $document 'keyup'
-		}
-		%listener $document 'mousemove' `
+		# mouse management
+		#-----------------
+		%whileTrueAwaitDom_js $document 'mousemove' `
 			const gameZone = document.getElementById('gameZone')
 			const relativeX = evt.clientX - gameZone.getBoundingClientRect().left
 			const paddle = document.getElementById('paddle')
 			paddle.setAttribute('x', relativeX - 37)
 		`
-		%continuous adapt thisPaddle `
-			function collision(ballCx, ballCy, brickX, brickY, brickWidth, brickHeight) {
-				return ballCx > brickX && ballCx < brickX+brickWidth && ballCy > brickY && ballCy < brickY+brickHeight
-			}
+		# ball bouncing (on paddle) management
+		#-------------------------------------
+		%whileTrueAwaitFrame adapt thisPaddle `
 			// Meeting
 			//--------
 			for (const ball of events.get('oneBall')) {
@@ -106,40 +118,48 @@
 
 {deffunc lifeOfBall ()
 	# birth
-	#-----------
+	#======
 	.var life
 	.var thisBall <-- :drawNewBall 240 290
-	{short (thisBall) `
+	{js (thisBall) `
 		thisBall.dx = 2
 		thisBall.dy = -2
 	`}
 	
 	# after birth
-	#------------
+	#============
 	{par @life
-		%continuous send thisBall `
+		# broadcasting the ball
+		#----------------------
+		%whileTrueAwaitFrame send thisBall `
 			send('oneBall', thisBall)
 		`
-		%continuous adapt thisBall `
+		# bouncing (on wall) management
+		#------------------------------
+		%whileTrueAwaitFrame adapt thisBall `
 			// Bouncing
 			//---------
 			if (v(thisBall.cx) + v(thisBall.r) > 480) thisBall.dx = - Math.abs(thisBall.dx)
 			if (v(thisBall.cx) - v(thisBall.r) < 0) thisBall.dx = Math.abs(thisBall.dx)
 			if (v(thisBall.cy) - v(thisBall.r) < 0) thisBall.dy = Math.abs(thisBall.dy)
 			
+			// If the ball is missed
+			//----------------------
 			if (v(thisBall.cy) - v(thisBall.r) > 320) {
 				goBreak('life')
 			}
 		`
-		%continuous play thisBall `
+		# move of the ball
+		#-----------------
+		%whileTrueAwaitFrame play thisBall `
 			thisBall.setAttribute('cx', v(thisBall.cx) + thisBall.dx)
 			thisBall.setAttribute('cy', v(thisBall.cy) + thisBall.dy)
 		`
 	}
 	
 	# death
-	#-------
-	{short (thisBall) `
+	#======
+	{js (thisBall) `
 		thisBall.parentNode.removeChild(thisBall)
 	`}
 }
@@ -151,14 +171,20 @@
 #
 #===============================
 
+# list of rows and columns
 .var column <-- :parRange 0 4
 .var row <-- :parRange 0 2
 
+# number of "lives"
 .var numberOfLives <-- 3
 .var livesText <-- %drawText 415 20 'Lives: 3'
 
+# score
 .var score <-- 0
 .var scoreText <-- %drawText 8 20 'Score: 0'
+
+# just a little optimization (?)
+!separateMicrostep
 
 {par
 	
@@ -169,25 +195,31 @@
 	# Bricks
 	#--------
 	{seq
-		{foreach column     # 'foreach' execute each one in parallel
-			{foreach row
+		{foreachPar column     # 'foreach' execute each one in parallel
+			{foreachPar row
 				{seq
+					# this executes all the life of the brick
 					:lifeOfBrick $column $row
+					# When the life of a brick ends, the score increases
 					score <-- [+ 1]
 				}
 			}
 		}
-		{short () `alert("YOU WIN, CONGRATS!");document.location.reload()`}
+		# When the lives of all bricks end, you win
+		{js () `alert("YOU WIN, CONGRATS!");document.location.reload()`}
 	}
 	
 	# Ball
 	#--------
 	{seq
 		{while [$numberOfLives > 0]
+			# When numberOfLives > 0, a new ball comes to life
 			!lifeOfBall
+			# When the life of the ball ends, numberOfLives decreases
 			numberOfLives <-- [- 1]
 		}
-		{short () `alert("GAME OVER");document.location.reload()`}
+		# When the last ball is dead, you loose
+		{js () `alert("GAME OVER");document.location.reload()`}
 	}
 	
 	# Paddle
@@ -197,15 +229,17 @@
 	#=======================================
 	# Display of all pieces of information
 	#=======================================
-	{while true
+	{whileTrue
+		# At each time when numberOfLives is set, the corresponding display is updated
 		:await numberOfLives beep
-		{short (livesText numberOfLives) `
+		{js (livesText numberOfLives) `
 			livesText.textContent = 'Lives: ' + numberOfLives
 		`}
 	}
-	{while true
+	{whileTrue
+		# At each time when score is set, the corresponding display is updated
 		:await score beep
-		{short (scoreText score) `
+		{js (scoreText score) `
 			scoreText.textContent = 'Score: ' + score
 		`}
 	}
