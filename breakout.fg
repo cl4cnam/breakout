@@ -75,15 +75,14 @@
 		# keyboard management
 		#--------------------
 		.var stopMove
-		.var move
 		# Each 'keyup' is translated into a stopMove
 		%whileTrueAwaitDom_translate $document 'keyup' stopMove
 		{whileTrue
 			.var evt <-- :awaitDOMevtBeep $document 'keydown'
 			{js (evt thisPaddle) `thisPaddle.evt = evt`}
-			{par @move
-				# first parallel branch: await a stopMove and break the 'par' construct
-				move <-- :await stopMove beep
+			{par_race
+				# first parallel branch: await a stopMove and break the 'par_race' construct
+				:await stopMove beep
 				# second parallel branch: At each frame, move the paddle
 				%whileTrueAwaitFrame play thisPaddle `
 					if(thisPaddle.evt.code  == "ArrowRight") {
